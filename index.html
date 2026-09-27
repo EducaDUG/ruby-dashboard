@@ -7036,6 +7036,48 @@ function esc(s){
   return String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 }
 
+/* Some upstream data fields that are meant to be a list of short phrases were
+   saved either as a real JS/JSON array, OR (a data bug seen in a few student
+   files) as a single string holding a Python-repr list literal such as
+   "['phrase one', 'phrase two']". Both must render as natural prose, never as
+   raw bracket/quote syntax. This helper normalises either shape into a plain
+   array of strings; a normal sentence-shaped string is returned unchanged. */
+function parsePyListLiteral(str){
+  const trimmed = String(str).trim();
+  if (!/^\[[\s\S]*\]$/.test(trimmed)) return null;
+  const inner = trimmed.slice(1, -1).trim();
+  if (!inner) return [];
+  const parts = inner.split(/['"]\s*,\s*['"]/);
+  return parts.map(p => p.replace(/^\s*['"]/, "").replace(/['"]\s*$/, "").trim()).filter(Boolean);
+}
+
+function toArrayOfStrings(v){
+  if (Array.isArray(v)) return v.map(x => String(x).trim()).filter(Boolean);
+  if (typeof v === "string") {
+    const parsed = parsePyListLiteral(v);
+    if (parsed !== null) return parsed;
+  }
+  return null;
+}
+
+/* Join a list of short phrases into flowing prose: "a", "a and b", or
+   "a, b, and c". Returns "" for an empty/missing list so callers can hide
+   the field entirely instead of showing empty punctuation. */
+function joinProse(arr){
+  if (!arr || !arr.length) return "";
+  if (arr.length === 1) return arr[0];
+  if (arr.length === 2) return `${arr[0]} and ${arr[1]}`;
+  return `${arr.slice(0, -1).join(", ")}, and ${arr[arr.length - 1]}`;
+}
+
+/* Renders any field that might be a plain string, a real array, or the
+   Python-repr-list-as-string bug as clean prose text (HTML-escaped). */
+function proseField(v){
+  const asArray = toArrayOfStrings(v);
+  if (asArray !== null) return esc(joinProse(asArray));
+  return esc(v || "");
+}
+
 function footerHtml(){
   return `<footer class="disclaimer">${esc(DISCLAIMER)}</footer>`;
 }
@@ -7233,10 +7275,16 @@ function renderProgress(){
       <h3>Early learning profile</h3>
       <div class="basis-note">Based on ${lp.based_on_sessions ?? 0} sessions so far — this will keep evolving as more sessions are logged.</div>
       <div class="profile-grid" style="margin-top:10px;">
-        <div class="item"><div class="k">Engages best when</div>${esc(lp.engages_best_when || "")}</div>
-        <div class="item"><div class="k">Responds well to</div>${esc(lp.responds_well_to || "")}</div>
-        <div class="item"><div class="k">Often curious about</div>${esc(lp.often_curious_about || "")}</div>
-        <div class="item"><div class="k">Currently trying</div>${esc(lp.currently_trying || "")}</div>
+        ${[
+          ["Engages best when", lp.engages_best_when],
+          ["Responds well to", lp.responds_well_to],
+          ["Often curious about", lp.often_curious_about],
+          ["Currently trying", lp.currently_trying],
+        ].map(([label, value]) => {
+          const text = proseField(value);
+          if (!text) return "";
+          return `<div class="item"><div class="k">${esc(label)}</div>${text}</div>`;
+        }).join("")}
       </div>
     </div>
   `;
